@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  SUPERVISOR
+  WORKER
+}
+
+enum OrderStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  DELIVERED
+  CANCELLED
+}
+
+enum PieceLogStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum WageType {
+  PIECE_RATE
+  DAILY
+  MONTHLY
+}
+
+enum WorkerPaymentType {
+  SALARY
+  ADVANCE
+  BONUS
+  DEDUCTION
+}
+
+enum WorkerPaymentStatus {
+  PENDING
+  PAID
+}
+
+model User {
+  id                String            @id @default(cuid())
+  name              String
+  email             String            @unique
+  passwordHash      String
+  role              Role              @default(WORKER)
+  isActive          Boolean           @default(true)
+  permissions       Json              @default("{}")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  orderAssignments  OrderAssignment[]
+  pieceLogs         PieceLog[]
+  workerPayments    WorkerPayment[]
+  wageConfigs       WorkerWageConfig[]
+  auditLogs         AuditLog[]
+
+  @@map("users")
+}
+
+model Client {
+  id            String    @id @default(cuid())
+  name          String
+  phone         String?
+  email         String?
+  address       String?
+  paymentTerms  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  orders        Order[]
+  payments      Payment[]
+
+  @@map("clients")
+}
+
+model Order {
+  id               String            @id @default(cuid())
+  orderNumber      String            @unique
+  clientId         String
+  description      String?
+  totalPieces      Int
+  deadline         DateTime?
+  status           OrderStatus       @default(PENDING)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  client           Client            @relation(fields: [clientId], references: [id])
+  orderAssignments OrderAssignment[]
+  payments         Payment[]
+
+  @@map("orders")
+}
+
+model OrderAssignment {
+  id              String     @id @default(cuid())
+  orderId         String
+  workerId        String
+  assignedPieces  Int
+  completedPieces Int        @default(0)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  order           Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  worker          User       @relation(fields: [workerId], references: [id])
+  pieceLogs       PieceLog[]
+
+  @@unique([orderId, workerId])
+  @@map("order_assignments")
+}
+
+model PieceLog {
+  id                 String         @id @default(cuid())
+  orderAssignmentId  String
+  loggedById         String
+  pieces             Int
+  status             PieceLogStatus @default(PENDING_APPROVAL)
+  note               String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  orderAssignment    OrderAssignment @relation(fields: [orderAssignmentId], references: [id], onDelete: Cascade)
+  loggedBy           User            @relation(fields: [loggedById], references: [id])
+
+  @@map("piece_logs")
+}
+
+model ExpenseCategory {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  description String?
+  color       String    @default("#6366f1")
+  createdAt   DateTime  @default(now())
+  expenses    Expense[]
+
+  @@map("expense_categories")
+}
+
+model Expense {
+  id         String          @id @default(cuid())
+  categoryId String
+  title      String
+  amount     Float
+  date       DateTime
+  note       String?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  category   ExpenseCategory @relation(fields: [categoryId], references: [id])
+
+  @@map("expenses")
+}
+
+model Payment {
+  id       String   @id @default(cuid())
+  clientId String
+  orderId  String?
+  amount   Float
+  date     DateTime
+  method   String?
+  note     String?
+  createdAt DateTime @default(now())
+  client   Client   @relation(fields: [clientId], references: [id])
+  order    Order?   @relation(fields: [orderId], references: [id])
+
+  @@map("payments")
+}
+
+model WorkerPayment {
+  id       String              @id @default(cuid())
+  workerId String
+  amount   Float
+  type     WorkerPaymentType
+  date     DateTime
+  note     String?
+  status   WorkerPaymentStatus @default(PENDING)
+  createdAt DateTime           @default(now())
+  worker   User                @relation(fields: [workerId], references: [id])
+
+  @@map("worker_payments")
+}
+
+model WorkerWageConfig {
+  id            String   @id @default(cuid())
+  workerId      String
+  wageType      WageType
+  ratePerPiece  Float?
+  dailyRate     Float?
+  monthlyRate   Float?
+  effectiveFrom DateTime @default(now())
+  worker        User     @relation(fields: [workerId], references: [id])
+
+  @@map("worker_wage_configs")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
