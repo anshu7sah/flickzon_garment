@@ -14,6 +14,7 @@ interface DashboardStats { activeOrders: number; totalClients: number; activeWor
 interface ChartPoint { name: string; value: number; fill?: string; }
 interface MonthlyData { month: string; income: number; expenses: number; }
 interface ActivityItem { id: string; action: string; entity: string; entityId: string; createdAt: string; metadata: Record<string, unknown>; user: { name: string }; }
+interface ClientDashboardStats { totalClients: number; activeClients: number; newClientsThisMonth: number; topClientsByRevenue: { id: string; name: string; revenue: number }[]; clientsWithOutstanding: { id: string; name: string; outstanding: number }[]; recentlyAddedClients: { id: string; name: string; clientType: string; createdAt: string }[]; }
 
 interface Props {
   userName: string;
@@ -24,9 +25,10 @@ interface Props {
   incomeVsExpenses: MonthlyData[] | null;
   recentActivity: ActivityItem[] | null;
   pendingCount: number;
+  clientStats: ClientDashboardStats | null;
 }
 
-export default function DashboardClient({ userName, role, stats, statusBreakdown, topWorkers, incomeVsExpenses, recentActivity, pendingCount }: Props) {
+export default function DashboardClient({ userName, role, stats, statusBreakdown, topWorkers, incomeVsExpenses, recentActivity, pendingCount, clientStats }: Props) {
   const showFull = hasPermission(role, "dashboard_full");
 
   return (
@@ -116,6 +118,45 @@ export default function DashboardClient({ userName, role, stats, statusBreakdown
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {showFull && clientStats && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card>
+            <CardHeader><CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-emerald-500" /> Client Insights</CardTitle></CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="text-center p-3 rounded-lg bg-blue-50"><p className="text-2xl font-bold text-blue-700">{clientStats.totalClients}</p><p className="text-xs text-gray-500">Total</p></div>
+                <div className="text-center p-3 rounded-lg bg-emerald-50"><p className="text-2xl font-bold text-emerald-700">{clientStats.activeClients}</p><p className="text-xs text-gray-500">Active</p></div>
+                <div className="text-center p-3 rounded-lg bg-indigo-50"><p className="text-2xl font-bold text-indigo-700">{clientStats.newClientsThisMonth}</p><p className="text-xs text-gray-500">New This Month</p></div>
+              </div>
+              {clientStats.topClientsByRevenue.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Top by Revenue</p>
+                  <div className="space-y-2">{clientStats.topClientsByRevenue.map(c => (
+                    <Link key={c.id} href={`/dashboard/clients/${c.id}`} className="flex items-center justify-between py-1.5 hover:bg-gray-50 rounded px-2 -mx-2 transition-colors">
+                      <span className="text-sm text-gray-900">{c.name}</span>
+                      <span className="text-sm font-medium text-emerald-600">{formatCurrency(c.revenue)}</span>
+                    </Link>
+                  ))}</div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          {clientStats.clientsWithOutstanding.length > 0 && (
+            <Card>
+              <CardHeader><CardTitle className="flex items-center gap-2"><AlertCircle className="h-5 w-5 text-rose-500" /> Outstanding Payments</CardTitle></CardHeader>
+              <CardContent>
+                <div className="space-y-2">{clientStats.clientsWithOutstanding.map(c => (
+                  <Link key={c.id} href={`/dashboard/clients/${c.id}`} className="flex items-center justify-between py-2 px-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors">
+                    <span className="text-sm text-gray-900">{c.name}</span>
+                    <span className="text-sm font-semibold text-rose-600">{formatCurrency(c.outstanding)}</span>
+                  </Link>
+                ))}</div>
               </CardContent>
             </Card>
           )}

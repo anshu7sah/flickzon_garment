@@ -46,6 +46,10 @@ export function getInitials(name: string): string {
 export function getStatusColor(status: string): string {
   const colors: Record<string, string> = {
     PENDING: "bg-amber-100 text-amber-800 border-amber-200",
+    ORDER_PLACED: "bg-amber-100 text-amber-800 border-amber-200",
+    CUTTING_IN_PROGRESS: "bg-sky-100 text-sky-800 border-sky-200",
+    CUTTING_DONE: "bg-teal-100 text-teal-800 border-teal-200",
+    STITCHING_IN_PROGRESS: "bg-blue-100 text-blue-800 border-blue-200",
     IN_PROGRESS: "bg-blue-100 text-blue-800 border-blue-200",
     COMPLETED: "bg-emerald-100 text-emerald-800 border-emerald-200",
     DELIVERED: "bg-purple-100 text-purple-800 border-purple-200",
@@ -54,13 +58,30 @@ export function getStatusColor(status: string): string {
     APPROVED: "bg-emerald-100 text-emerald-800 border-emerald-200",
     REJECTED: "bg-red-100 text-red-800 border-red-200",
     PAID: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    PARTIAL: "bg-yellow-100 text-yellow-800 border-yellow-200",
     ACTIVE: "bg-emerald-100 text-emerald-800 border-emerald-200",
     INACTIVE: "bg-gray-100 text-gray-800 border-gray-200",
+    SUSPENDED: "bg-orange-100 text-orange-800 border-orange-200",
+    BLACKLISTED: "bg-red-100 text-red-800 border-red-200",
   };
   return colors[status] ?? "bg-gray-100 text-gray-800 border-gray-200";
+}
+
+export function formatStatusLabel(status: string): string {
+  return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function calculatePercentage(part: number, total: number): number {
   if (total === 0) return 0;
   return Math.round((part / total) * 100);
+}
+
+export function generateClientCode(): string {
+  const now = new Date();
+  const year = now.getFullYear().toString().slice(-2);
+  const month = (now.getMonth() + 1).toString().padStart(2, "0");
+  const random = Math.floor(Math.random() * 10000)
+    .toString()
+    .padStart(4, "0");
+  return `CLT-${year}${month}-${random}`;
 }

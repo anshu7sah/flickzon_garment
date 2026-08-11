@@ -8,7 +8,7 @@ export async function getDashboardStats() {
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
   const [activeOrders, totalClients, activeWorkers, monthlyPayments, monthlyExpenses] = await Promise.all([
-    prisma.order.count({ where: { status: { in: ["PENDING", "IN_PROGRESS"] } } }),
+    prisma.order.count({ where: { status: { in: ["ORDER_PLACED", "CUTTING_IN_PROGRESS", "CUTTING_DONE", "STITCHING_IN_PROGRESS"] } } }),
     prisma.client.count(),
     prisma.user.count({ where: { role: "WORKER", isActive: true } }),
     prisma.payment.aggregate({ _sum: { amount: true }, where: { date: { gte: startOfMonth, lte: endOfMonth } } }),
@@ -22,16 +22,16 @@ export async function getDashboardStats() {
 }
 
 export async function getOrderStatusBreakdown() {
-  const statuses = ["PENDING", "IN_PROGRESS", "COMPLETED", "DELIVERED", "CANCELLED"] as const;
+  const statuses = ["ORDER_PLACED", "CUTTING_IN_PROGRESS", "CUTTING_DONE", "STITCHING_IN_PROGRESS", "COMPLETED", "DELIVERED", "CANCELLED"] as const;
   const counts = await Promise.all(statuses.map(async (status) => {
     const count = await prisma.order.count({ where: { status } });
-    return { name: status.replace("_", " "), value: count, fill: getStatusFill(status) };
+    return { name: status.replace(/_/g, " "), value: count, fill: getStatusFill(status) };
   }));
   return counts.filter((c) => c.value > 0);
 }
 
 function getStatusFill(status: string): string {
-  const fills: Record<string, string> = { PENDING: "#f59e0b", IN_PROGRESS: "#3b82f6", COMPLETED: "#10b981", DELIVERED: "#8b5cf6", CANCELLED: "#ef4444" };
+  const fills: Record<string, string> = { ORDER_PLACED: "#f59e0b", CUTTING_IN_PROGRESS: "#0ea5e9", CUTTING_DONE: "#14b8a6", STITCHING_IN_PROGRESS: "#3b82f6", COMPLETED: "#10b981", DELIVERED: "#8b5cf6", CANCELLED: "#ef4444" };
   return fills[status] ?? "#6b7280";
 }
 

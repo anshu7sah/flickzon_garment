@@ -14,11 +14,32 @@ enum Role {
 }
 
 enum OrderStatus {
-  PENDING
-  IN_PROGRESS
+  ORDER_PLACED
+  CUTTING_IN_PROGRESS
+  CUTTING_DONE
+  STITCHING_IN_PROGRESS
   COMPLETED
-  DELIVERED
   CANCELLED
+  DELIVERED
+}
+
+enum OrderType {
+  FABRICATION
+  WHOLE_PIECES
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CHEQUE
+  OTHER
+}
+
+enum OrderPaymentStatus {
+  PENDING
+  PARTIAL
+  PAID
 }
 
 enum PieceLogStatus {
@@ -45,6 +66,41 @@ enum WorkerPaymentStatus {
   PAID
 }
 
+enum ClientType {
+  INDIVIDUAL
+  RETAILER
+  BOUTIQUE
+  WHOLESALER
+  MANUFACTURER
+  EXPORT_CLIENT
+  OTHER
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  BLACKLISTED
+}
+
+enum MaterialType {
+  FABRIC
+  ZIPPER
+  DHAGA
+  BUTTON
+  ELASTIC
+  LACE
+  OTHER
+}
+
+enum MaterialUnit {
+  KG
+  METER
+  PIECE
+  ROLL
+  DOZEN
+}
+
 model User {
   id                String            @id @default(cuid())
   name              String
@@ -65,35 +121,202 @@ model User {
 }
 
 model Client {
-  id            String    @id @default(cuid())
-  name          String
-  phone         String?
-  email         String?
-  address       String?
-  paymentTerms  String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  orders        Order[]
-  payments      Payment[]
+  id                    String       @id @default(cuid())
+  name                  String
+  clientCode            String?      @unique
+  clientType            ClientType   @default(INDIVIDUAL)
+  companyName           String?
+  status                ClientStatus @default(ACTIVE)
 
+  // Contact Information
+  phone                 String?
+  secondaryPhone        String?
+  whatsappNumber        String?
+  email                 String?
+  website               String?
+
+  // Address Information
+  country               String?
+  state                 String?
+  city                  String?
+  postalCode            String?
+  address               String?
+
+  // Business Information
+  contactPerson         String?
+  designation           String?
+  taxNumber             String?
+  businessRegNumber     String?
+
+  // Financial Information
+  paymentTerms          String?
+  creditLimit           Float?       @default(0)
+  openingBalance        Float?       @default(0)
+  currency              String?      @default("INR")
+  preferredPaymentMethod String?
+
+  // Order Preferences
+  preferredGarmentType  String?
+  preferredFabric       String?
+  preferredColour       String?
+  preferredSizeChart    String?
+  preferredDeliveryMethod String?
+
+  // Internal Information
+  internalNotes         String?
+  specialInstructions   String?
+
+  // Profile
+  profilePhotoUrl       String?
+
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  orders                Order[]
+  payments              Payment[]
+  notes                 ClientNote[]
+
+  @@index([name])
+  @@index([phone])
+  @@index([email])
+  @@index([clientCode])
+  @@index([clientType])
+  @@index([status])
   @@map("clients")
 }
 
-model Order {
-  id               String            @id @default(cuid())
-  orderNumber      String            @unique
-  clientId         String
-  description      String?
-  totalPieces      Int
-  deadline         DateTime?
-  status           OrderStatus       @default(PENDING)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  client           Client            @relation(fields: [clientId], references: [id])
-  orderAssignments OrderAssignment[]
-  payments         Payment[]
+model ClientNote {
+  id        String   @id @default(cuid())
+  clientId  String
+  content   String
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
+  @@index([clientId])
+  @@map("client_notes")
+}
+
+// ── Cloth & Fabric Types (admin-configurable) ──────────────────────
+
+model ClothType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  orders      OrderClothType[]
+
+  @@map("cloth_types")
+}
+
+model FabricType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  orders      OrderFabricType[]
+
+  @@map("fabric_types")
+}
+
+// ── Materials ──────────────────────────────────────────────────────
+
+model Material {
+  id        String       @id @default(cuid())
+  name      String
+  type      MaterialType
+  unit      MaterialUnit
+  price     Float        @default(0)
+  colors    Json         @default("[]")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  orderMaterials OrderMaterial[]
+
+  @@index([type])
+  @@map("materials")
+}
+
+// ── Orders ─────────────────────────────────────────────────────────
+
+model Order {
+  id                String             @id @default(cuid())
+  orderNumber       String             @unique
+  clientId          String
+  orderType         OrderType          @default(FABRICATION)
+  description       String?
+  orderDescription  String?
+  totalPieces       Int
+  rate              Float              @default(0)
+  deadline          DateTime?
+  status            OrderStatus        @default(ORDER_PLACED)
+
+  // Payment
+  paymentMethod     PaymentMethod?
+  paymentStatus     OrderPaymentStatus @default(PENDING)
+  advanceAmount     Float              @default(0)
+
+  // Auto-calculated financials
+  totalOrderValue   Float              @default(0)
+  totalInvestment   Float              @default(0)
+  totalProfit       Float              @default(0)
+
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  // Relations
+  client            Client             @relation(fields: [clientId], references: [id])
+  orderAssignments  OrderAssignment[]
+  payments          Payment[]
+  expenses          Expense[]
+  orderMaterials    OrderMaterial[]
+  clothTypes        OrderClothType[]
+  fabricTypes       OrderFabricType[]
+
+  @@index([status])
+  @@index([clientId])
   @@map("orders")
+}
+
+// ── Order Multi-Select Join Tables ─────────────────────────────────
+
+model OrderClothType {
+  id          String    @id @default(cuid())
+  orderId     String
+  clothTypeId String
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  clothType   ClothType @relation(fields: [clothTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, clothTypeId])
+  @@map("order_cloth_types")
+}
+
+model OrderFabricType {
+  id           String     @id @default(cuid())
+  orderId      String
+  fabricTypeId String
+  color        String?
+  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  fabricType   FabricType @relation(fields: [fabricTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, fabricTypeId])
+  @@map("order_fabric_types")
+}
+
+// ── Order Materials ────────────────────────────────────────────────
+
+model OrderMaterial {
+  id            String   @id @default(cuid())
+  orderId       String
+  materialId    String
+  quantity      Float    @default(0)
+  colorSelected String?
+  totalCost     Float    @default(0)
+  createdAt     DateTime @default(now())
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  material      Material @relation(fields: [materialId], references: [id])
+
+  @@unique([orderId, materialId, colorSelected])
+  @@map("order_materials")
 }
 
 model OrderAssignment {
@@ -127,6 +350,8 @@ model PieceLog {
   @@map("piece_logs")
 }
 
+// ── Expenses ───────────────────────────────────────────────────────
+
 model ExpenseCategory {
   id          String    @id @default(cuid())
   name        String    @unique
@@ -141,6 +366,7 @@ model ExpenseCategory {
 model Expense {
   id         String          @id @default(cuid())
   categoryId String
+  orderId    String?
   title      String
   amount     Float
   date       DateTime
@@ -148,9 +374,13 @@ model Expense {
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
   category   ExpenseCategory @relation(fields: [categoryId], references: [id])
+  order      Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
+  @@index([orderId])
   @@map("expenses")
 }
+
+// ── Payments ───────────────────────────────────────────────────────
 
 model Payment {
   id       String   @id @default(cuid())
@@ -166,6 +396,8 @@ model Payment {
 
   @@map("payments")
 }
+
+// ── Worker Payments & Wages ────────────────────────────────────────
 
 model WorkerPayment {
   id       String              @id @default(cuid())
@@ -193,6 +425,8 @@ model WorkerWageConfig {
 
   @@map("worker_wage_configs")
 }
+
+// ── Audit Log ──────────────────────────────────────────────────────
 
 model AuditLog {
   id        String   @id @default(cuid())

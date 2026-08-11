@@ -6,12 +6,14 @@ import type { ActionResponse } from "@/types";
 import { createOrderSchema, updateOrderSchema, assignWorkerSchema, logPiecesSchema, approvePieceLogSchema } from "@/lib/validations/orders";
 import { generateOrderNumber } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
+import { recalculateOrderFinancials } from "@/actions/materials";
 
 export async function getOrders(params: {
   page?: number;
   pageSize?: number;
   search?: string;
   status?: string;
+  orderType?: string;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
 }) {
@@ -29,6 +31,9 @@ export async function getOrders(params: {
   }
   if (params.status) {
     where.status = params.status;
+  }
+  if (params.orderType) {
+    where.orderType = params.orderType;
   }
 
   const orderBy: Record<string, string> = {};
@@ -48,6 +53,9 @@ export async function getOrders(params: {
             worker: { select: { id: true, name: true } },
           },
         },
+        clothTypes: { include: { clothType: true } },
+        fabricTypes: { include: { fabricType: true } },
+        _count: { select: { expenses: true, orderMaterials: true } },
       },
       orderBy,
       skip,
@@ -84,10 +92,32 @@ export async function getOrderById(id: string) {
       payments: {
         orderBy: { createdAt: "desc" },
       },
+      expenses: {
+        include: {
+          category: { select: { id: true, name: true, color: true } },
+        },
+        orderBy: { date: "desc" },
+      },
+      orderMaterials: {
+        include: {
+          material: true,
+        },
+        orderBy: { createdAt: "desc" },
+      },
+      clothTypes: { include: { clothType: true } },
+      fabricTypes: { include: { fabricType: true } },
     },
   });
 
   return order;
+}
+
+/** Get minimal order list for dropdowns */
+export async function getAllOrders() {
+  return prisma.order.findMany({
+    select: { id: true, orderNumber: true },
+    orderBy: { createdAt: "desc" },
+  });
 }
 
 export async function createOrder(
@@ -99,18 +129,49 @@ export async function createOrder(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
+    const totalOrderValue = parsed.data.rate * parsed.data.totalPieces;
+
     const order = await prisma.order.create({
       data: {
         orderNumber: generateOrderNumber(),
         clientId: parsed.data.clientId,
+        orderType: parsed.data.orderType,
         description: parsed.data.description,
+        orderDescription: parsed.data.orderDescription,
         totalPieces: parsed.data.totalPieces,
+        rate: parsed.data.rate,
         deadline: parsed.data.deadline
           ? new Date(parsed.data.deadline)
           : null,
+        paymentMethod: parsed.data.paymentMethod ?? null,
+        paymentStatus: parsed.data.paymentStatus,
+        advanceAmount: parsed.data.advanceAmount,
+        totalOrderValue,
+        totalProfit: totalOrderValue,
       },
       select: { id: true },
     });
+
+    // Create cloth type associations
+    if (parsed.data.clothTypeIds.length > 0) {
+      await prisma.orderClothType.createMany({
+        data: parsed.data.clothTypeIds.map((ctId) => ({
+          orderId: order.id,
+          clothTypeId: ctId,
+        })),
+      });
+    }
+
+    // Create fabric type associations with optional colors
+    if (parsed.data.fabricTypeIds.length > 0) {
+      await prisma.orderFabricType.createMany({
+        data: parsed.data.fabricTypeIds.map((ftId) => ({
+          orderId: order.id,
+          fabricTypeId: ftId,
+          color: parsed.data.fabricColors[ftId] || null,
+        })),
+      });
+    }
 
     await createAuditLog(userId, "CREATE", "Order", order.id, {
       orderNumber: order.id,
@@ -136,15 +197,51 @@ export async function updateOrder(
       where: { id: parsed.data.id },
       data: {
         clientId: parsed.data.clientId,
+        orderType: parsed.data.orderType,
         description: parsed.data.description,
+        orderDescription: parsed.data.orderDescription,
         totalPieces: parsed.data.totalPieces,
+        rate: parsed.data.rate,
         deadline: parsed.data.deadline
           ? new Date(parsed.data.deadline)
           : null,
         status: parsed.data.status,
+        paymentMethod: parsed.data.paymentMethod ?? null,
+        paymentStatus: parsed.data.paymentStatus,
+        advanceAmount: parsed.data.advanceAmount,
       },
       select: { id: true },
     });
+
+    // Update cloth type associations - delete old and recreate
+    await prisma.orderClothType.deleteMany({
+      where: { orderId: order.id },
+    });
+    if (parsed.data.clothTypeIds.length > 0) {
+      await prisma.orderClothType.createMany({
+        data: parsed.data.clothTypeIds.map((ctId) => ({
+          orderId: order.id,
+          clothTypeId: ctId,
+        })),
+      });
+    }
+
+    // Update fabric type associations
+    await prisma.orderFabricType.deleteMany({
+      where: { orderId: order.id },
+    });
+    if (parsed.data.fabricTypeIds.length > 0) {
+      await prisma.orderFabricType.createMany({
+        data: parsed.data.fabricTypeIds.map((ftId) => ({
+          orderId: order.id,
+          fabricTypeId: ftId,
+          color: parsed.data.fabricColors[ftId] || null,
+        })),
+      });
+    }
+
+    // Recalculate financials
+    await recalculateOrderFinancials(order.id);
 
     await createAuditLog(userId, "UPDATE", "Order", order.id, {
       status: parsed.data.status,
@@ -182,6 +279,32 @@ export async function assignWorker(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
+    // Check total assigned pieces don't exceed totalPieces
+    const order = await prisma.order.findUnique({
+      where: { id: parsed.data.orderId },
+      select: { totalPieces: true },
+    });
+    if (!order) {
+      return { success: false, error: "Order not found" };
+    }
+
+    const existingAssignments = await prisma.orderAssignment.findMany({
+      where: { orderId: parsed.data.orderId },
+      select: { assignedPieces: true },
+    });
+    const totalAssigned = existingAssignments.reduce(
+      (sum, a) => sum + a.assignedPieces,
+      0
+    );
+    const remaining = order.totalPieces - totalAssigned;
+
+    if (parsed.data.assignedPieces > remaining) {
+      return {
+        success: false,
+        error: `Cannot assign ${parsed.data.assignedPieces} pieces. Only ${remaining} pieces remaining out of ${order.totalPieces} total.`,
+      };
+    }
+
     const existing = await prisma.orderAssignment.findUnique({
       where: {
         orderId_workerId: {
@@ -204,10 +327,20 @@ export async function assignWorker(
       select: { id: true },
     });
 
-    await prisma.order.update({
+    // Auto-set to STITCHING_IN_PROGRESS if order is ORDER_PLACED or CUTTING_DONE
+    const currentOrder = await prisma.order.findUnique({
       where: { id: parsed.data.orderId },
-      data: { status: "IN_PROGRESS" },
+      select: { status: true },
     });
+    if (
+      currentOrder &&
+      (currentOrder.status === "ORDER_PLACED" || currentOrder.status === "CUTTING_DONE")
+    ) {
+      await prisma.order.update({
+        where: { id: parsed.data.orderId },
+        data: { status: "STITCHING_IN_PROGRESS" },
+      });
+    }
 
     await createAuditLog(userId, "ASSIGN_WORKER", "OrderAssignment", assignment.id, {
       orderId: parsed.data.orderId,

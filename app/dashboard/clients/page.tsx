@@ -6,10 +6,34 @@ import ClientsClient from "./clients-client";
 export default async function ClientsPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const params = await searchParams;
   const [clientsData, session] = await Promise.all([
-    getClients({ page: Number(params.page ?? "1"), pageSize: Number(params.pageSize ?? "10"), search: params.search ?? "", sortBy: params.sortBy, sortOrder: (params.sortOrder as "asc" | "desc") ?? "desc" }),
+    getClients({
+      page: Number(params.page ?? "1"),
+      pageSize: Number(params.pageSize ?? "10"),
+      search: params.search ?? "",
+      sortBy: params.sortBy,
+      sortOrder: (params.sortOrder as "asc" | "desc") ?? "desc",
+      status: params.status ?? "",
+      clientType: params.clientType ?? "",
+    }),
     auth(),
   ]);
   const role = session?.user?.role as Role;
-  const serialized = clientsData.data.map(c => ({ ...c, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() }));
-  return <ClientsClient clients={serialized} total={clientsData.total} page={clientsData.page} pageSize={clientsData.pageSize} role={role} searchValue={params.search ?? ""} />;
+  const serialized = clientsData.data.map(c => ({
+    ...c,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
+    orders: c.orders.map(o => ({ ...o, createdAt: o.createdAt.toISOString() })),
+  }));
+  return (
+    <ClientsClient
+      clients={serialized}
+      total={clientsData.total}
+      page={clientsData.page}
+      pageSize={clientsData.pageSize}
+      role={role}
+      searchValue={params.search ?? ""}
+      statusFilter={params.status ?? ""}
+      clientTypeFilter={params.clientType ?? ""}
+    />
+  );
 }

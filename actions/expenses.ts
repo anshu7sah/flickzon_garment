@@ -5,6 +5,7 @@ import { withPermission, createAuditLog } from "@/actions/auth";
 import type { ActionResponse } from "@/types";
 import { createExpenseCategorySchema, createExpenseSchema, updateExpenseSchema } from "@/lib/validations/expenses";
 import { revalidatePath } from "next/cache";
+import { recalculateOrderFinancials } from "@/actions/materials";
 
 export async function getExpenseCategories() {
   return prisma.expenseCategory.findMany({ include: { _count: { select: { expenses: true } }, expenses: { select: { amount: true } } }, orderBy: { name: "asc" } });
@@ -46,7 +47,16 @@ export async function getExpenses(params: { page?: number; pageSize?: number; se
   }
   const orderBy: Record<string, string> = params.sortBy ? { [params.sortBy]: params.sortOrder ?? "desc" } : { date: "desc" };
   const [data, total] = await Promise.all([
-    prisma.expense.findMany({ where, include: { category: { select: { id: true, name: true, color: true } } }, orderBy, skip, take: pageSize }),
+    prisma.expense.findMany({
+      where,
+      include: {
+        category: { select: { id: true, name: true, color: true } },
+        order: { select: { id: true, orderNumber: true } },
+      },
+      orderBy,
+      skip,
+      take: pageSize,
+    }),
     prisma.expense.count({ where }),
   ]);
   return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
@@ -56,7 +66,22 @@ export async function createExpense(data: unknown): Promise<ActionResponse<{ id:
   return withPermission("expense_management", async (userId) => {
     const parsed = createExpenseSchema.safeParse(data);
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
-    const expense = await prisma.expense.create({ data: { categoryId: parsed.data.categoryId, title: parsed.data.title, amount: parsed.data.amount, date: new Date(parsed.data.date), note: parsed.data.note }, select: { id: true } });
+    const expense = await prisma.expense.create({
+      data: {
+        categoryId: parsed.data.categoryId,
+        orderId: parsed.data.orderId || null,
+        title: parsed.data.title,
+        amount: parsed.data.amount,
+        date: new Date(parsed.data.date),
+        note: parsed.data.note,
+      },
+      select: { id: true },
+    });
+    // If linked to an order, recalculate that order's financials
+    if (parsed.data.orderId) {
+      await recalculateOrderFinancials(parsed.data.orderId);
+      revalidatePath(`/dashboard/orders/${parsed.data.orderId}`);
+    }
     await createAuditLog(userId, "CREATE", "Expense", expense.id, { amount: parsed.data.amount });
     revalidatePath("/dashboard/expenses");
     revalidatePath("/dashboard/finance");
@@ -69,7 +94,34 @@ export async function updateExpense(data: unknown): Promise<ActionResponse<{ id:
   return withPermission("expense_management", async (userId) => {
     const parsed = updateExpenseSchema.safeParse(data);
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message };
-    const expense = await prisma.expense.update({ where: { id: parsed.data.id }, data: { categoryId: parsed.data.categoryId, title: parsed.data.title, amount: parsed.data.amount, date: new Date(parsed.data.date), note: parsed.data.note }, select: { id: true } });
+
+    // Get old expense to check if order changed
+    const oldExpense = await prisma.expense.findUnique({ where: { id: parsed.data.id }, select: { orderId: true } });
+
+    const expense = await prisma.expense.update({
+      where: { id: parsed.data.id },
+      data: {
+        categoryId: parsed.data.categoryId,
+        orderId: parsed.data.orderId || null,
+        title: parsed.data.title,
+        amount: parsed.data.amount,
+        date: new Date(parsed.data.date),
+        note: parsed.data.note,
+      },
+      select: { id: true },
+    });
+
+    // Recalculate old order if it changed
+    if (oldExpense?.orderId && oldExpense.orderId !== parsed.data.orderId) {
+      await recalculateOrderFinancials(oldExpense.orderId);
+      revalidatePath(`/dashboard/orders/${oldExpense.orderId}`);
+    }
+    // Recalculate new order
+    if (parsed.data.orderId) {
+      await recalculateOrderFinancials(parsed.data.orderId);
+      revalidatePath(`/dashboard/orders/${parsed.data.orderId}`);
+    }
+
     await createAuditLog(userId, "UPDATE", "Expense", expense.id);
     revalidatePath("/dashboard/expenses");
     revalidatePath("/dashboard/finance");
@@ -79,7 +131,13 @@ export async function updateExpense(data: unknown): Promise<ActionResponse<{ id:
 
 export async function deleteExpense(id: string): Promise<ActionResponse<undefined>> {
   return withPermission("expense_management", async (userId) => {
+    const expense = await prisma.expense.findUnique({ where: { id }, select: { orderId: true } });
     await prisma.expense.delete({ where: { id } });
+    // Recalculate order if linked
+    if (expense?.orderId) {
+      await recalculateOrderFinancials(expense.orderId);
+      revalidatePath(`/dashboard/orders/${expense.orderId}`);
+    }
     await createAuditLog(userId, "DELETE", "Expense", id);
     revalidatePath("/dashboard/expenses");
     revalidatePath("/dashboard/finance");

@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Scissors,
+  Layers,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -55,6 +56,12 @@ const navItems: NavItem[] = [
     label: "Workers",
     href: "/dashboard/workers",
     icon: <HardHat className="h-5 w-5" />,
+  },
+  {
+    label: "Materials",
+    href: "/dashboard/materials",
+    icon: <Layers className="h-5 w-5" />,
+    permission: "create_edit_orders",
   },
   {
     label: "Expenses",

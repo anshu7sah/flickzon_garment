@@ -52,7 +52,7 @@ export default function WorkersClient({ workers, total, page, pageSize, role, se
 
   const columns: Column<WorkerItem>[] = [
     { key: "name", header: "Name", sortable: true, render: (w) => <span className="font-medium">{w.name}</span> },
-    { key: "assignments", header: "Assignments", render: (w) => w.orderAssignments.filter(a => ["PENDING","IN_PROGRESS"].includes(a.order.status)).length },
+    { key: "assignments", header: "Assignments", render: (w) => w.orderAssignments.filter(a => ["ORDER_PLACED","CUTTING_IN_PROGRESS","CUTTING_DONE","STITCHING_IN_PROGRESS"].includes(a.order.status)).length },
     { key: "pieces", header: "Pieces (Total)", render: (w) => w.orderAssignments.reduce((s, a) => s + a.completedPieces, 0) },
     { key: "earnings", header: "Total Paid", render: (w) => formatCurrency(w.workerPayments.filter(p => p.status === "PAID").reduce((s, p) => s + (p.type === "DEDUCTION" ? -p.amount : p.amount), 0)) },
     { key: "wage", header: "Wage Type", render: (w) => { const cfg = w.wageConfigs[0]; return cfg ? <Badge variant="outline">{cfg.wageType.replace("_", " ")}</Badge> : "—"; } },

@@ -8,8 +8,9 @@ interface StatusBadgeProps {
 }
 
 function StatusBadge({ status }: StatusBadgeProps) {
-  const colorClasses = getStatusColor(status);
-  const displayStatus = status.replace(/_/g, " ");
+  const safeStatus = status || "ACTIVE";
+  const colorClasses = getStatusColor(safeStatus);
+  const displayStatus = safeStatus.replace(/_/g, " ");
 
   return (
     <Badge className={colorClasses} variant="outline">

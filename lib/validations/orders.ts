@@ -2,20 +2,44 @@ import { z } from "zod";
 
 export const createOrderSchema = z.object({
   clientId: z.string().min(1, "Client is required"),
+  orderType: z.enum(["FABRICATION", "WHOLE_PIECES"]).default("FABRICATION"),
   description: z.string().optional(),
+  orderDescription: z.string().optional(),
   totalPieces: z.coerce.number().int().positive("Total pieces must be positive"),
+  rate: z.coerce.number().min(0, "Rate must be non-negative").default(0),
   deadline: z.string().optional(),
+  paymentMethod: z.enum(["CASH", "UPI", "BANK_TRANSFER", "CHEQUE", "OTHER"]).optional().nullable(),
+  paymentStatus: z.enum(["PENDING", "PARTIAL", "PAID"]).default("PENDING"),
+  advanceAmount: z.coerce.number().min(0).default(0),
+  clothTypeIds: z.array(z.string()).default([]),
+  fabricTypeIds: z.array(z.string()).default([]),
+  fabricColors: z.record(z.string(), z.string()).default({}),
 });
 
-export const updateOrderSchema = createOrderSchema.extend({
+export const updateOrderSchema = z.object({
   id: z.string(),
+  clientId: z.string().min(1, "Client is required"),
+  orderType: z.enum(["FABRICATION", "WHOLE_PIECES"]).default("FABRICATION"),
+  description: z.string().optional(),
+  orderDescription: z.string().optional(),
+  totalPieces: z.coerce.number().int().positive("Total pieces must be positive"),
+  rate: z.coerce.number().min(0, "Rate must be non-negative").default(0),
+  deadline: z.string().optional(),
   status: z.enum([
-    "PENDING",
-    "IN_PROGRESS",
+    "ORDER_PLACED",
+    "CUTTING_IN_PROGRESS",
+    "CUTTING_DONE",
+    "STITCHING_IN_PROGRESS",
     "COMPLETED",
-    "DELIVERED",
     "CANCELLED",
+    "DELIVERED",
   ]),
+  paymentMethod: z.enum(["CASH", "UPI", "BANK_TRANSFER", "CHEQUE", "OTHER"]).optional().nullable(),
+  paymentStatus: z.enum(["PENDING", "PARTIAL", "PAID"]).default("PENDING"),
+  advanceAmount: z.coerce.number().min(0).default(0),
+  clothTypeIds: z.array(z.string()).default([]),
+  fabricTypeIds: z.array(z.string()).default([]),
+  fabricColors: z.record(z.string(), z.string()).default({}),
 });
 
 export const assignWorkerSchema = z.object({

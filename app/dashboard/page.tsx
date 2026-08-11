@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { getDashboardStats, getOrderStatusBreakdown, getTopWorkers, getIncomeVsExpenses, getRecentActivity } from "@/actions/dashboard";
 import { getPendingApprovals } from "@/actions/orders";
+import { getClientDashboardStats } from "@/actions/clients";
 import { hasPermission } from "@/lib/permissions";
 import type { Role } from "@prisma/client";
 import DashboardClient from "./dashboard-client";
@@ -10,13 +11,14 @@ export default async function DashboardPage() {
   const role = session?.user?.role as Role;
   const showFull = hasPermission(role, "dashboard_full");
 
-  const [stats, statusBreakdown, topWorkers, incomeVsExpenses, recentActivity, pendingCount] = await Promise.all([
+  const [stats, statusBreakdown, topWorkers, incomeVsExpenses, recentActivity, pendingCount, clientStats] = await Promise.all([
     showFull ? getDashboardStats() : null,
     showFull ? getOrderStatusBreakdown() : null,
     showFull ? getTopWorkers() : null,
     showFull ? getIncomeVsExpenses() : null,
     showFull ? getRecentActivity() : null,
     getPendingApprovals(),
+    showFull ? getClientDashboardStats() : null,
   ]);
 
   return (
@@ -29,6 +31,8 @@ export default async function DashboardPage() {
       incomeVsExpenses={incomeVsExpenses}
       recentActivity={recentActivity ? recentActivity.map(a => ({ ...a, createdAt: a.createdAt.toISOString(), metadata: a.metadata as Record<string, unknown> })) : null}
       pendingCount={pendingCount}
+      clientStats={clientStats}
     />
   );
 }
+
