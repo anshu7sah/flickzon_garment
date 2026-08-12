@@ -1,6 +1,8 @@
 import { getOrders } from "@/actions/orders";
 import { getAllClients } from "@/actions/clients";
 import { getClothTypes, getFabricTypes } from "@/actions/materials";
+import { getAllPatterns } from "@/actions/patterns";
+import { getAllExtraDependencies } from "@/actions/extra-dependencies";
 import { auth } from "@/lib/auth";
 import type { Role } from "@prisma/client";
 import OrdersClient from "./orders-client";
@@ -15,11 +17,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const status = params.status ?? "";
   const orderType = params.orderType ?? "";
 
-  const [ordersData, clients, clothTypes, fabricTypes, session] = await Promise.all([
+  const [ordersData, clients, clothTypes, fabricTypes, patterns, extraDependencies, session] = await Promise.all([
     getOrders({ page, pageSize, search, sortBy, sortOrder, status, orderType }),
     getAllClients(),
     getClothTypes(),
     getFabricTypes(),
+    getAllPatterns(),
+    getAllExtraDependencies(),
     auth(),
   ]);
 
@@ -27,6 +31,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
 
   const serializedOrders = ordersData.data.map(o => ({
     ...o,
+    imageUrls: (o.imageUrls as string[]) ?? [],
     createdAt: o.createdAt.toISOString(),
     updatedAt: o.updatedAt.toISOString(),
     deadline: o.deadline?.toISOString() ?? null,
@@ -48,6 +53,24 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     _count: ft._count,
   }));
 
+  const serializedPatterns = patterns.map(p => ({
+    id: p.id,
+    patternNumber: p.patternNumber,
+    name: p.name,
+    description: p.description,
+    clientId: p.clientId,
+    createdAt: p.createdAt.toISOString(),
+    client: p.client,
+  }));
+
+  const serializedExtraDependencies = extraDependencies.map(ed => ({
+    id: ed.id,
+    name: ed.name,
+    defaultPrice: ed.defaultPrice,
+    description: ed.description,
+    createdAt: ed.createdAt.toISOString(),
+  }));
+
   return (
     <OrdersClient
       orders={serializedOrders}
@@ -57,6 +80,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       clients={clients}
       clothTypes={serializedClothTypes}
       fabricTypes={serializedFabricTypes}
+      patterns={serializedPatterns}
+      extraDependencies={serializedExtraDependencies}
       role={role}
       searchValue={search}
     />

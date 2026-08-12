@@ -14,6 +14,15 @@ export const createOrderSchema = z.object({
   clothTypeIds: z.array(z.string()).default([]),
   fabricTypeIds: z.array(z.string()).default([]),
   fabricColors: z.record(z.string(), z.string()).default({}),
+  patternId: z.string().optional().nullable(),
+  newPatternName: z.string().optional(),
+  newPatternDescription: z.string().optional(),
+  imageUrls: z.array(z.string()).default([]),
+  extraDependencies: z.array(z.object({
+    extraDependencyId: z.string(),
+    quantity: z.coerce.number().min(0).default(1),
+    price: z.coerce.number().min(0).default(0),
+  })).default([]),
 });
 
 export const updateOrderSchema = z.object({
@@ -40,6 +49,13 @@ export const updateOrderSchema = z.object({
   clothTypeIds: z.array(z.string()).default([]),
   fabricTypeIds: z.array(z.string()).default([]),
   fabricColors: z.record(z.string(), z.string()).default({}),
+  patternId: z.string().optional().nullable(),
+  imageUrls: z.array(z.string()).default([]),
+  extraDependencies: z.array(z.object({
+    extraDependencyId: z.string(),
+    quantity: z.coerce.number().min(0).default(1),
+    price: z.coerce.number().min(0).default(0),
+  })).default([]),
 });
 
 export const assignWorkerSchema = z.object({
@@ -68,3 +84,4 @@ export type UpdateOrderInput = z.infer<typeof updateOrderSchema>;
 export type AssignWorkerInput = z.infer<typeof assignWorkerSchema>;
 export type LogPiecesInput = z.infer<typeof logPiecesSchema>;
 export type ApprovePieceLogInput = z.infer<typeof approvePieceLogSchema>;
+

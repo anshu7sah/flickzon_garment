@@ -3,10 +3,17 @@
 import { prisma } from "@/lib/prisma";
 import { withPermission, createAuditLog } from "@/actions/auth";
 import type { ActionResponse } from "@/types";
-import { createOrderSchema, updateOrderSchema, assignWorkerSchema, logPiecesSchema, approvePieceLogSchema } from "@/lib/validations/orders";
+import {
+  createOrderSchema,
+  updateOrderSchema,
+  assignWorkerSchema,
+  logPiecesSchema,
+  approvePieceLogSchema,
+} from "@/lib/validations/orders";
 import { generateOrderNumber } from "@/lib/utils";
 import { revalidatePath } from "next/cache";
 import { recalculateOrderFinancials } from "@/actions/materials";
+import type { Prisma } from "@prisma/client";
 
 export async function getOrders(params: {
   page?: number;
@@ -48,6 +55,7 @@ export async function getOrders(params: {
       where,
       include: {
         client: { select: { id: true, name: true } },
+        pattern: { select: { id: true, patternNumber: true, name: true } },
         orderAssignments: {
           include: {
             worker: { select: { id: true, name: true } },
@@ -55,6 +63,7 @@ export async function getOrders(params: {
         },
         clothTypes: { include: { clothType: true } },
         fabricTypes: { include: { fabricType: true } },
+        extraDependencies: { include: { extraDependency: true } },
         _count: { select: { expenses: true, orderMaterials: true } },
       },
       orderBy,
@@ -78,6 +87,7 @@ export async function getOrderById(id: string) {
     where: { id },
     include: {
       client: { select: { id: true, name: true, phone: true, email: true } },
+      pattern: { select: { id: true, patternNumber: true, name: true, description: true } },
       orderAssignments: {
         include: {
           worker: { select: { id: true, name: true, email: true } },
@@ -106,6 +116,9 @@ export async function getOrderById(id: string) {
       },
       clothTypes: { include: { clothType: true } },
       fabricTypes: { include: { fabricType: true } },
+      extraDependencies: {
+        include: { extraDependency: true },
+      },
     },
   });
 
@@ -129,23 +142,39 @@ export async function createOrder(
       return { success: false, error: parsed.error.issues[0].message };
     }
 
+    const orderNumber = generateOrderNumber();
+    let finalPatternId = parsed.data.patternId || null;
+
+    // If no pattern selected, create a new Pattern automatically
+    if (!finalPatternId) {
+      const newPattern = await prisma.pattern.create({
+        data: {
+          name: parsed.data.newPatternName || parsed.data.description || `Pattern for Order ${orderNumber}`,
+          description: parsed.data.newPatternDescription || parsed.data.orderDescription || null,
+          clientId: parsed.data.clientId,
+        },
+        select: { id: true },
+      });
+      finalPatternId = newPattern.id;
+    }
+
     const totalOrderValue = parsed.data.rate * parsed.data.totalPieces;
 
     const order = await prisma.order.create({
       data: {
-        orderNumber: generateOrderNumber(),
+        orderNumber,
         clientId: parsed.data.clientId,
+        patternId: finalPatternId,
         orderType: parsed.data.orderType,
         description: parsed.data.description,
         orderDescription: parsed.data.orderDescription,
         totalPieces: parsed.data.totalPieces,
         rate: parsed.data.rate,
-        deadline: parsed.data.deadline
-          ? new Date(parsed.data.deadline)
-          : null,
+        deadline: parsed.data.deadline ? new Date(parsed.data.deadline) : null,
         paymentMethod: parsed.data.paymentMethod ?? null,
         paymentStatus: parsed.data.paymentStatus,
         advanceAmount: parsed.data.advanceAmount,
+        imageUrls: (parsed.data.imageUrls as unknown as Prisma.InputJsonValue) ?? [],
         totalOrderValue,
         totalProfit: totalOrderValue,
       },
@@ -173,8 +202,28 @@ export async function createOrder(
       });
     }
 
+    // Create extra dependencies
+    if (parsed.data.extraDependencies && parsed.data.extraDependencies.length > 0) {
+      for (const ed of parsed.data.extraDependencies) {
+        if (!ed.extraDependencyId) continue;
+        const totalCost = ed.quantity * ed.price;
+        await prisma.orderExtraDependency.create({
+          data: {
+            orderId: order.id,
+            extraDependencyId: ed.extraDependencyId,
+            quantity: ed.quantity,
+            price: ed.price,
+            totalCost,
+          },
+        });
+      }
+    }
+
+    // Recalculate financials (incorporating extra dependencies)
+    await recalculateOrderFinancials(order.id);
+
     await createAuditLog(userId, "CREATE", "Order", order.id, {
-      orderNumber: order.id,
+      orderNumber,
     });
 
     revalidatePath("/dashboard/orders");
@@ -197,23 +246,23 @@ export async function updateOrder(
       where: { id: parsed.data.id },
       data: {
         clientId: parsed.data.clientId,
+        patternId: parsed.data.patternId || null,
         orderType: parsed.data.orderType,
         description: parsed.data.description,
         orderDescription: parsed.data.orderDescription,
         totalPieces: parsed.data.totalPieces,
         rate: parsed.data.rate,
-        deadline: parsed.data.deadline
-          ? new Date(parsed.data.deadline)
-          : null,
+        deadline: parsed.data.deadline ? new Date(parsed.data.deadline) : null,
         status: parsed.data.status,
         paymentMethod: parsed.data.paymentMethod ?? null,
         paymentStatus: parsed.data.paymentStatus,
         advanceAmount: parsed.data.advanceAmount,
+        imageUrls: (parsed.data.imageUrls as unknown as Prisma.InputJsonValue) ?? [],
       },
       select: { id: true },
     });
 
-    // Update cloth type associations - delete old and recreate
+    // Update cloth type associations
     await prisma.orderClothType.deleteMany({
       where: { orderId: order.id },
     });
@@ -238,6 +287,26 @@ export async function updateOrder(
           color: parsed.data.fabricColors[ftId] || null,
         })),
       });
+    }
+
+    // Update extra dependencies
+    await prisma.orderExtraDependency.deleteMany({
+      where: { orderId: order.id },
+    });
+    if (parsed.data.extraDependencies && parsed.data.extraDependencies.length > 0) {
+      for (const ed of parsed.data.extraDependencies) {
+        if (!ed.extraDependencyId) continue;
+        const totalCost = ed.quantity * ed.price;
+        await prisma.orderExtraDependency.create({
+          data: {
+            orderId: order.id,
+            extraDependencyId: ed.extraDependencyId,
+            quantity: ed.quantity,
+            price: ed.price,
+            totalCost,
+          },
+        });
+      }
     }
 
     // Recalculate financials
@@ -400,6 +469,30 @@ export async function logPieces(
     return { success: false, error: "You do not have permission to log pieces" };
   }
 
+  // Fetch assignment to check assigned pieces constraint
+  const assignment = await prisma.orderAssignment.findUnique({
+    where: { id: parsed.data.orderAssignmentId },
+    include: {
+      pieceLogs: {
+        where: { status: { in: ["APPROVED", "PENDING_APPROVAL"] } },
+      },
+    },
+  });
+
+  if (!assignment) {
+    return { success: false, error: "Assignment not found" };
+  }
+
+  const alreadyLogged = assignment.pieceLogs.reduce((sum, log) => sum + log.pieces, 0);
+  const remainingLoggable = assignment.assignedPieces - alreadyLogged;
+
+  if (parsed.data.pieces > remainingLoggable) {
+    return {
+      success: false,
+      error: `Cannot log ${parsed.data.pieces} pieces. Assignment limit is ${assignment.assignedPieces} pieces, and ${alreadyLogged} pieces are already logged/pending (${Math.max(0, remainingLoggable)} pieces remaining).`,
+    };
+  }
+
   const pieceLog = await prisma.pieceLog.create({
     data: {
       orderAssignmentId: parsed.data.orderAssignmentId,
@@ -415,9 +508,7 @@ export async function logPieces(
     pieces: parsed.data.pieces,
   });
 
-  revalidatePath(
-    `/dashboard/orders/${pieceLog.orderAssignment.orderId}`
-  );
+  revalidatePath(`/dashboard/orders/${pieceLog.orderAssignment.orderId}`);
   revalidatePath("/dashboard");
 
   return { success: true, data: { id: pieceLog.id } };
@@ -475,9 +566,7 @@ export async function approvePieceLog(
       status: parsed.data.status,
     });
 
-    revalidatePath(
-      `/dashboard/orders/${pieceLog.orderAssignment.orderId}`
-    );
+    revalidatePath(`/dashboard/orders/${pieceLog.orderAssignment.orderId}`);
     revalidatePath("/dashboard");
 
     return { success: true, data: undefined };

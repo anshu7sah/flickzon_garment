@@ -288,6 +288,7 @@ export async function recalculateOrderFinancials(orderId: string) {
     include: {
       orderMaterials: true,
       expenses: true,
+      extraDependencies: true,
     },
   });
   if (!order) return;
@@ -301,7 +302,11 @@ export async function recalculateOrderFinancials(orderId: string) {
     (sum, e) => sum + e.amount,
     0
   );
-  const totalInvestment = materialCosts + expenseCosts;
+  const extraDepCosts = order.extraDependencies.reduce(
+    (sum, ed) => sum + ed.totalCost,
+    0
+  );
+  const totalInvestment = materialCosts + expenseCosts + extraDepCosts;
   const totalProfit = totalOrderValue - totalInvestment;
 
   await prisma.order.update({

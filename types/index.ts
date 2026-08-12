@@ -25,6 +25,7 @@ export interface OrderWithRelations {
   id: string;
   orderNumber: string;
   clientId: string;
+  patternId?: string | null;
   orderType: string;
   description: string | null;
   orderDescription: string | null;
@@ -38,9 +39,11 @@ export interface OrderWithRelations {
   totalOrderValue: number;
   totalInvestment: number;
   totalProfit: number;
+  imageUrls?: string[];
   createdAt: Date;
   updatedAt: Date;
   client: { id: string; name: string };
+  pattern?: { id: string; patternNumber: number; name: string } | null;
   orderAssignments: {
     id: string;
     assignedPieces: number;
@@ -49,6 +52,7 @@ export interface OrderWithRelations {
   }[];
   clothTypes: { id: string; clothType: { id: string; name: string } }[];
   fabricTypes: { id: string; fabricType: { id: string; name: string }; color: string | null }[];
+  extraDependencies?: { id: string; extraDependencyId: string; quantity: number; price: number; totalCost: number; extraDependency: { id: string; name: string } }[];
   _count?: { expenses: number; orderMaterials: number };
 }
 
@@ -213,6 +217,37 @@ export interface FabricTypeItem {
   description: string | null;
   createdAt: string;
   _count: { orders: number };
+}
+
+export interface PatternItem {
+  id: string;
+  patternNumber: number;
+  name: string;
+  description: string | null;
+  clientId: string;
+  createdAt: string;
+  client?: { id: string; name: string };
+  _count?: { orders: number };
+}
+
+export interface ExtraDependencyItem {
+  id: string;
+  name: string;
+  defaultPrice: number;
+  description: string | null;
+  createdAt: string;
+  _count?: { orderExtraDeps: number };
+}
+
+export interface OrderExtraDependencyItem {
+  id: string;
+  orderId: string;
+  extraDependencyId: string;
+  quantity: number;
+  price: number;
+  totalCost: number;
+  createdAt: string;
+  extraDependency: ExtraDependencyItem;
 }
 
 export interface OrderMaterialItem {

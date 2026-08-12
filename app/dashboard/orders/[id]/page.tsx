@@ -1,6 +1,7 @@
-import { getOrderById, getAllOrders } from "@/actions/orders";
+import { getOrderById } from "@/actions/orders";
 import { getAllWorkers } from "@/actions/workers";
 import { getAllMaterials } from "@/actions/materials";
+import { getAllExtraDependencies } from "@/actions/extra-dependencies";
 import { auth } from "@/lib/auth";
 import { notFound } from "next/navigation";
 import type { Role } from "@prisma/client";
@@ -8,10 +9,11 @@ import OrderDetailClient from "./order-detail-client";
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [order, workers, materials, session] = await Promise.all([
+  const [order, workers, materials, allExtraDeps, session] = await Promise.all([
     getOrderById(id),
     getAllWorkers(),
     getAllMaterials(),
+    getAllExtraDependencies(),
     auth(),
   ]);
   if (!order) notFound();
@@ -21,6 +23,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
   const serialized = {
     ...order,
+    imageUrls: (order.imageUrls as string[]) ?? [],
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
     deadline: order.deadline?.toISOString() ?? null,
@@ -42,6 +45,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         updatedAt: om.material.updatedAt.toISOString(),
       },
     })),
+    extraDependencies: (order.extraDependencies ?? []).map(ed => ({
+      ...ed,
+      createdAt: ed.createdAt.toISOString(),
+    })),
   };
 
   const serializedMaterials = materials.map(m => ({
@@ -51,5 +58,20 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     updatedAt: m.updatedAt.toISOString(),
   }));
 
-  return <OrderDetailClient order={serialized} workers={workers} materials={serializedMaterials} role={role} userId={userId} userPermissions={permissions} />;
+  const serializedExtraDeps = allExtraDeps.map(ed => ({
+    ...ed,
+    createdAt: ed.createdAt.toISOString(),
+  }));
+
+  return (
+    <OrderDetailClient
+      order={serialized}
+      workers={workers}
+      materials={serializedMaterials}
+      allExtraDependencies={serializedExtraDeps}
+      role={role}
+      userId={userId}
+      userPermissions={permissions}
+    />
+  );
 }

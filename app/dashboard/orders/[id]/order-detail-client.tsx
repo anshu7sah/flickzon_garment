@@ -15,14 +15,16 @@ import { hasPermission } from "@/lib/permissions";
 import { formatDate, calculatePercentage, formatCurrency, formatStatusLabel } from "@/lib/utils";
 import { assignWorker, removeAssignment, logPieces, approvePieceLog, updateOrder } from "@/actions/orders";
 import { addOrderMaterial, removeOrderMaterial } from "@/actions/materials";
+import { addOrderExtraDependency, removeOrderExtraDependency } from "@/actions/extra-dependencies";
 import { toast } from "sonner";
 import {
   UserPlus, Trash2, CheckCircle, XCircle, ArrowLeft, Package, Clock, Edit,
-  DollarSign, TrendingUp, TrendingDown, Layers, Plus, Receipt, AlertCircle, Shirt
+  DollarSign, TrendingUp, TrendingDown, Layers, Plus, Receipt, AlertCircle, Shirt,
+  Sparkles, Image as ImageIcon, Wrench
 } from "lucide-react";
 import Link from "next/link";
 import type { Role } from "@prisma/client";
-import type { MaterialItem } from "@/types";
+import type { MaterialItem, ExtraDependencyItem } from "@/types";
 
 interface PieceLogSerialized {
   id: string;
@@ -59,6 +61,17 @@ interface OrderMaterialSerialized {
   material: MaterialItem;
 }
 
+interface OrderExtraDependencySerialized {
+  id: string;
+  orderId: string;
+  extraDependencyId: string;
+  quantity: number;
+  price: number;
+  totalCost: number;
+  createdAt: string;
+  extraDependency: { id: string; name: string };
+}
+
 interface ExpenseSerialized {
   id: string;
   categoryId: string;
@@ -76,6 +89,7 @@ interface OrderSerialized {
   id: string;
   orderNumber: string;
   clientId: string;
+  patternId?: string | null;
   orderType: string;
   description: string | null;
   orderDescription: string | null;
@@ -89,13 +103,16 @@ interface OrderSerialized {
   totalOrderValue: number;
   totalInvestment: number;
   totalProfit: number;
+  imageUrls?: string[];
   createdAt: string;
   updatedAt: string;
   client: { id: string; name: string; phone: string | null; email: string | null };
+  pattern?: { id: string; patternNumber: number; name: string; description: string | null } | null;
   orderAssignments: AssignmentSerialized[];
   payments: { id: string; amount: number; date: string; method: string | null; note: string | null; createdAt: string }[];
   expenses: ExpenseSerialized[];
   orderMaterials: OrderMaterialSerialized[];
+  extraDependencies: OrderExtraDependencySerialized[];
   clothTypes: { id: string; clothType: { id: string; name: string } }[];
   fabricTypes: { id: string; fabricType: { id: string; name: string }; color: string | null }[];
 }
@@ -104,6 +121,7 @@ interface Props {
   order: OrderSerialized;
   workers: { id: string; name: string }[];
   materials: MaterialItem[];
+  allExtraDependencies?: ExtraDependencyItem[];
   role: Role;
   userId: string;
   userPermissions: Record<string, boolean>;
@@ -119,16 +137,26 @@ const ORDER_STATUSES = [
   { value: "CANCELLED", label: "Cancelled" },
 ];
 
-export default function OrderDetailClient({ order, workers, materials, role, userId, userPermissions }: Props) {
+export default function OrderDetailClient({
+  order,
+  workers,
+  materials,
+  allExtraDependencies = [],
+  role,
+  userId,
+  userPermissions,
+}: Props) {
   const router = useRouter();
   const [showAssign, setShowAssign] = useState(false);
   const [showLogPieces, setShowLogPieces] = useState<string | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [showAddExtraDep, setShowAddExtraDep] = useState(false);
 
   const [assignData, setAssignData] = useState({ workerId: "", assignedPieces: "" });
   const [logData, setLogData] = useState({ pieces: "", note: "" });
   const [materialData, setMaterialData] = useState({ materialId: "", quantity: "", colorSelected: "" });
+  const [extraDepData, setExtraDepData] = useState({ extraDependencyId: "", quantity: "1", price: "" });
   const [editStatus, setEditStatus] = useState(order.status);
   const [loading, setLoading] = useState(false);
 
@@ -172,8 +200,12 @@ export default function OrderDetailClient({ order, workers, materials, role, use
     setLoading(true);
     const result = await logPieces({ orderAssignmentId: showLogPieces, pieces: Number(logData.pieces), note: logData.note || undefined });
     setLoading(false);
-    if (result.success) { toast.success("Pieces logged — pending approval"); setShowLogPieces(null); setLogData({ pieces: "", note: "" }); router.refresh(); }
-    else toast.error(result.error);
+    if (result.success) {
+      toast.success("Pieces logged — pending approval");
+      setShowLogPieces(null);
+      setLogData({ pieces: "", note: "" });
+      router.refresh();
+    } else toast.error(result.error);
   };
 
   const handleApprove = async (pieceLogId: string, status: "APPROVED" | "REJECTED") => {
@@ -225,6 +257,32 @@ export default function OrderDetailClient({ order, workers, materials, role, use
     if (result.success) { toast.success("Material removed"); router.refresh(); } else toast.error(result.error);
   };
 
+  const handleAddExtraDep = async () => {
+    if (!extraDepData.extraDependencyId) {
+      toast.error("Select a dependency");
+      return;
+    }
+    setLoading(true);
+    const result = await addOrderExtraDependency({
+      orderId: order.id,
+      extraDependencyId: extraDepData.extraDependencyId,
+      quantity: Number(extraDepData.quantity) || 1,
+      price: Number(extraDepData.price) || 0,
+    });
+    setLoading(false);
+    if (result.success) {
+      toast.success("Extra dependency added");
+      setShowAddExtraDep(false);
+      setExtraDepData({ extraDependencyId: "", quantity: "1", price: "" });
+      router.refresh();
+    } else toast.error(result.error);
+  };
+
+  const handleRemoveExtraDep = async (extraDepAssignmentId: string) => {
+    const result = await removeOrderExtraDependency(extraDepAssignmentId, order.id);
+    if (result.success) { toast.success("Extra dependency removed"); router.refresh(); } else toast.error(result.error);
+  };
+
   const availableWorkers = workers.filter(w => !order.orderAssignments.some(a => a.workerId === w.id));
 
   return (
@@ -238,6 +296,11 @@ export default function OrderDetailClient({ order, workers, materials, role, use
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-gray-900">{order.orderNumber}</h1>
+              {order.pattern && (
+                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 gap-1 font-semibold">
+                  <Sparkles className="h-3 w-3" /> Pattern #{order.pattern.patternNumber}
+                </Badge>
+              )}
               <StatusBadge status={order.status} />
               <Badge variant="outline">{formatStatusLabel(order.orderType)}</Badge>
             </div>
@@ -303,6 +366,50 @@ export default function OrderDetailClient({ order, workers, materials, role, use
         </CardContent>
       </Card>
 
+      {/* Pattern Card */}
+      {order.pattern && (
+        <Card className="border-amber-200 bg-amber-50/30">
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm flex items-center justify-between text-amber-900">
+              <span className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-amber-600" /> Pattern Details (Auto-Generated / Linked)
+              </span>
+              <Badge className="bg-amber-100 text-amber-800 border-amber-300">
+                Pattern #{order.pattern.patternNumber}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 text-xs text-amber-900 space-y-1">
+            <p><span className="font-semibold">Pattern Title:</span> {order.pattern.name}</p>
+            {order.pattern.description && <p><span className="font-semibold">Description:</span> {order.pattern.description}</p>}
+            <p className="text-[11px] text-amber-700 italic">This pattern number can be selected for future re-orders by {order.client.name}.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Order Progress Photos (Cloudinary) */}
+      {order.imageUrls && order.imageUrls.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ImageIcon className="h-5 w-5 text-purple-600" /> Piece Progress & Sample Photos ({order.imageUrls.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+              {order.imageUrls.map((url, idx) => (
+                <a key={idx} href={url} target="_blank" rel="noreferrer" className="block group aspect-square rounded-lg border border-gray-200 overflow-hidden bg-gray-100 relative">
+                  <img src={url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-medium transition-opacity">
+                    View Photo
+                  </div>
+                </a>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Description & Cloth/Fabric Types */}
       {(order.description || order.orderDescription || order.clothTypes.length > 0 || order.fabricTypes.length > 0) && (
         <Card>
@@ -311,12 +418,12 @@ export default function OrderDetailClient({ order, workers, materials, role, use
             {order.clothTypes.length > 0 || order.fabricTypes.length > 0 ? (
               <div className="flex flex-wrap gap-2 items-center">
                 <span className="text-xs font-semibold text-gray-500 uppercase mr-2">Cloth & Fabric:</span>
-                {order.clothTypes.map(c => (
+                {order.clothTypes.map((c) => (
                   <Badge key={c.id} className="bg-blue-50 text-blue-700 border-blue-200 gap-1">
                     <Shirt className="h-3 w-3" /> {c.clothType.name}
                   </Badge>
                 ))}
-                {order.fabricTypes.map(f => (
+                {order.fabricTypes.map((f) => (
                   <Badge key={f.id} className="bg-purple-50 text-purple-700 border-purple-200 gap-1">
                     <Layers className="h-3 w-3" /> {f.fabricType.name} {f.color && `(${f.color})`}
                   </Badge>
@@ -340,6 +447,51 @@ export default function OrderDetailClient({ order, workers, materials, role, use
           </CardContent>
         </Card>
       )}
+
+      {/* Extra Dependencies Section (Kaaj button, DTF order, DTF heat, etc.) */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="flex items-center gap-2">
+            <Wrench className="h-5 w-5 text-indigo-600" /> Extra Dependencies (Kaaj button, DTF order, DTF heat...) ({order.extraDependencies?.length || 0})
+          </CardTitle>
+          {canEdit && (
+            <Button size="sm" variant="outline" onClick={() => setShowAddExtraDep(true)} className="gap-1.5">
+              <Plus className="h-4 w-4" /> Add Dependency
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {!order.extraDependencies || order.extraDependencies.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-6">No extra dependencies attached to this order.</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {order.extraDependencies.map((ed) => (
+                <div key={ed.id} className="py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-8 w-8 rounded bg-indigo-50 flex items-center justify-center">
+                      <Wrench className="h-4 w-4 text-indigo-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-sm text-gray-900">{ed.extraDependency.name}</p>
+                      <p className="text-xs text-gray-500">
+                        Qty: {ed.quantity} @ {formatCurrency(ed.price)} each
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-semibold text-sm text-indigo-700">{formatCurrency(ed.totalCost)}</span>
+                    {canEdit && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => handleRemoveExtraDep(ed.id)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Materials Used Section */}
       <Card>
@@ -453,6 +605,12 @@ export default function OrderDetailClient({ order, workers, materials, role, use
               {order.orderAssignments.map((assignment) => {
                 const pct = calculatePercentage(assignment.completedPieces, assignment.assignedPieces);
                 const isOwnAssignment = assignment.workerId === userId;
+
+                // Enforced piece log limit calculation
+                const loggedOrPending = assignment.pieceLogs
+                  .filter((l) => l.status === "APPROVED" || l.status === "PENDING_APPROVAL")
+                  .reduce((sum, l) => sum + l.pieces, 0);
+
                 return (
                   <div key={assignment.id} className="rounded-lg border border-gray-200 p-4">
                     <div className="flex items-center justify-between mb-3">
@@ -462,8 +620,13 @@ export default function OrderDetailClient({ order, workers, materials, role, use
                       </div>
                       <div className="flex items-center gap-2">
                         {(canLogAll || (canWorkerLog && isOwnAssignment)) && (
-                          <Button size="sm" variant="outline" onClick={() => setShowLogPieces(assignment.id)}>
-                            Log Pieces
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShowLogPieces(assignment.id)}
+                            disabled={loggedOrPending >= assignment.assignedPieces}
+                          >
+                            {loggedOrPending >= assignment.assignedPieces ? "Limit Reached" : "Log Pieces"}
                           </Button>
                         )}
                         {canAssign && (
@@ -473,7 +636,8 @@ export default function OrderDetailClient({ order, workers, materials, role, use
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 mb-3">
+
+                    <div className="flex items-center gap-3 mb-2">
                       <div className="flex-1 h-2 rounded-full bg-gray-200 overflow-hidden">
                         <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${pct}%` }} />
                       </div>
@@ -482,7 +646,14 @@ export default function OrderDetailClient({ order, workers, materials, role, use
                       </span>
                     </div>
 
-                    {/* Piece Logs */}
+                    <div className="text-[11px] text-gray-500 flex items-center justify-between border-t border-gray-100 pt-2">
+                      <span>Logged / Pending: <strong className="text-gray-800">{loggedOrPending} / {assignment.assignedPieces} max assigned</strong></span>
+                      {loggedOrPending >= assignment.assignedPieces && (
+                        <span className="text-amber-600 font-medium">Worker cannot log beyond {assignment.assignedPieces} pcs limit</span>
+                      )}
+                    </div>
+
+                    {/* Piece Logs History */}
                     {assignment.pieceLogs.length > 0 && (
                       <div className="border-t border-gray-100 pt-3 mt-3">
                         <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Piece Logs History</p>
@@ -528,11 +699,11 @@ export default function OrderDetailClient({ order, workers, materials, role, use
             </div>
             <div className="space-y-2">
               <Label>Worker</Label>
-              <Select options={availableWorkers.map(w => ({ value: w.id, label: w.name }))} placeholder="Select worker" value={assignData.workerId} onChange={(e) => setAssignData(d => ({ ...d, workerId: e.target.value }))} />
+              <Select options={availableWorkers.map((w) => ({ value: w.id, label: w.name }))} placeholder="Select worker" value={assignData.workerId} onChange={(e) => setAssignData((d) => ({ ...d, workerId: e.target.value }))} />
             </div>
             <div className="space-y-2">
               <Label>Pieces to Assign (max {remainingUnassigned})</Label>
-              <Input type="number" max={remainingUnassigned} value={assignData.assignedPieces} onChange={(e) => setAssignData(d => ({ ...d, assignedPieces: e.target.value }))} />
+              <Input type="number" max={remainingUnassigned} value={assignData.assignedPieces} onChange={(e) => setAssignData((d) => ({ ...d, assignedPieces: e.target.value }))} />
             </div>
           </div>
           <DialogFooter>
@@ -549,16 +720,55 @@ export default function OrderDetailClient({ order, workers, materials, role, use
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Pieces Completed</Label>
-              <Input type="number" value={logData.pieces} onChange={(e) => setLogData(d => ({ ...d, pieces: e.target.value }))} placeholder="Number of pieces finished" />
+              <Input type="number" value={logData.pieces} onChange={(e) => setLogData((d) => ({ ...d, pieces: e.target.value }))} placeholder="Number of pieces finished" />
             </div>
             <div className="space-y-2">
               <Label>Note (optional)</Label>
-              <Textarea value={logData.note} onChange={(e) => setLogData(d => ({ ...d, note: e.target.value }))} placeholder="Any notes on stitching/cutting..." />
+              <Textarea value={logData.note} onChange={(e) => setLogData((d) => ({ ...d, note: e.target.value }))} placeholder="Any notes on stitching/cutting..." />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowLogPieces(null)}>Cancel</Button>
             <Button onClick={handleLogPieces} disabled={loading}>{loading ? "Submitting..." : "Submit Log"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Extra Dependency Dialog */}
+      <Dialog open={showAddExtraDep} onOpenChange={setShowAddExtraDep}>
+        <DialogContent onClose={() => setShowAddExtraDep(false)}>
+          <DialogHeader><DialogTitle>Add Extra Dependency</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Extra Dependency</Label>
+              <Select
+                options={allExtraDependencies.map((ed) => ({ value: ed.id, label: `${ed.name} (Default: ₹${ed.defaultPrice})` }))}
+                placeholder="Select dependency (e.g. Kaaj button, DTF)"
+                value={extraDepData.extraDependencyId}
+                onChange={(e) => {
+                  const selected = allExtraDependencies.find((ed) => ed.id === e.target.value);
+                  setExtraDepData((d) => ({
+                    ...d,
+                    extraDependencyId: e.target.value,
+                    price: selected ? String(selected.defaultPrice) : "",
+                  }));
+                }}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Quantity</Label>
+                <Input type="number" value={extraDepData.quantity} onChange={(e) => setExtraDepData((d) => ({ ...d, quantity: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Rate / Price (₹)</Label>
+                <Input type="number" step="0.01" value={extraDepData.price} onChange={(e) => setExtraDepData((d) => ({ ...d, price: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddExtraDep(false)}>Cancel</Button>
+            <Button onClick={handleAddExtraDep} disabled={loading}>{loading ? "Adding..." : "Add Dependency"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -571,15 +781,15 @@ export default function OrderDetailClient({ order, workers, materials, role, use
             <div className="space-y-2">
               <Label>Material</Label>
               <Select
-                options={materials.map(m => ({ value: m.id, label: `${m.name} (${formatCurrency(m.price)}/${m.unit})` }))}
+                options={materials.map((m) => ({ value: m.id, label: `${m.name} (${formatCurrency(m.price)}/${m.unit})` }))}
                 placeholder="Select material"
                 value={materialData.materialId}
-                onChange={(e) => setMaterialData(d => ({ ...d, materialId: e.target.value, colorSelected: "" }))}
+                onChange={(e) => setMaterialData((d) => ({ ...d, materialId: e.target.value, colorSelected: "" }))}
               />
             </div>
             <div className="space-y-2">
               <Label>Quantity {selectedMaterialObj ? `(${selectedMaterialObj.unit})` : ""}</Label>
-              <Input type="number" step="0.01" value={materialData.quantity} onChange={(e) => setMaterialData(d => ({ ...d, quantity: e.target.value }))} placeholder="0.00" />
+              <Input type="number" step="0.01" value={materialData.quantity} onChange={(e) => setMaterialData((d) => ({ ...d, quantity: e.target.value }))} placeholder="0.00" />
             </div>
             {selectedMaterialObj && selectedMaterialObj.colors && selectedMaterialObj.colors.length > 0 && (
               <div className="space-y-2">
@@ -589,7 +799,7 @@ export default function OrderDetailClient({ order, workers, materials, role, use
                     <button
                       key={color}
                       type="button"
-                      onClick={() => setMaterialData(d => ({ ...d, colorSelected: color }))}
+                      onClick={() => setMaterialData((d) => ({ ...d, colorSelected: color }))}
                       className={`h-7 w-7 rounded-full border-2 flex items-center justify-center transition-all ${
                         materialData.colorSelected === color ? "border-indigo-600 scale-110 shadow-md" : "border-gray-300"
                       }`}
